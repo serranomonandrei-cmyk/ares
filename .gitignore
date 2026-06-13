@@ -1,0 +1,12 @@
+.env
+*.pyc
+__pycache__/
+*.parquet
+data_cache/
+signal_cache/
+results/
+*.log
+.venv/
+venv/
+*.npy
+.DS_Store
