@@ -122,19 +122,106 @@ crypto_ares/
 
 ## Paper Trading
 
+Real-time paper trading using live Binance WebSocket feeds. Mirrors backtest logic **exactly** — same signals, same regime detection, same risk controls.
+
+### Quick Start
+
 ```bash
-# Live paper trading (connects to Binance WebSocket)
-python paper_trade.py --symbols BTC/USDT,SOL/USDT,BNB/USDT \
-    --risk 0.025 --leverage 10 --signal-gate 5
+# Install dependencies (if not already)
+pip install websockets requests
+
+# Run with top 5 coins (default)
+python paper_trade.py
+
+# Run with specific symbols
+python paper_trade.py --symbols BTC/USDT,SOL/USDT,BNB/USDT
+
+# Custom risk and leverage
+python paper_trade.py --risk 0.025 --leverage 10 --signal-gate 5
 ```
 
-**paper_trade.py** features:
-- Real-time 15m WebSocket feed (Binance futures)
-- Mirrors backtest logic exactly (same engine)
-- Tracks virtual equity, positions, PnL
-- Logs every decision for audit
-- Risk controls: max DD, max positions, consecutive loss guard
-- Telegram/Discord alerts (optional)
+### Command Line Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--symbols` | Top 5 (BTC,SOL,BNB,XRP,DOGE) | Comma-separated trading pairs |
+| `--risk` | 0.025 | Risk per trade (2.5% equity) |
+| `--leverage` | 10 | Max leverage |
+| `--signal-gate` | 5 | Base daily signal limit |
+| `--capital` | 50.0 | Initial virtual capital per coin |
+
+### What It Does
+
+1. **Connects to Binance WebSocket** — receives 15m klines in real-time
+2. **Loads historical data** from `data_cache/` (or fetches via REST API)
+3. **Computes features** on every closed bar (RSI, EMA, ATR, BB, MACD, ADX, etc.)
+4. **Evaluates signals** — engulfing, inside bar, SFP, RSI divergence (GPU-accelerated)
+5. **Checks regime** — updates 4h regime every 4 bars (ADX/EMA slope/MACD)
+6. **Manages positions** — entry, SL, TP, 48h time exit, reversal detection
+7. **Logs everything** — trades to `paper_trades.json`, equity to `paper_equity.json`
+
+### Output Files
+
+| File | Description |
+|------|-------------|
+| `paper_trades.json` | Every trade (entry/exit/PnL/regime/reason) |
+| `paper_equity.json` | Equity curve per symbol (last 1000 points) |
+| `paper_trade.log` | Full execution log with timestamps |
+
+### Risk Controls (Same as Backtest)
+
+- **Regime-adaptive risk**: 50% in ranging, 100% in strong trends
+- **Consecutive loss guard**: 5 losses → risk halves (min 0.5%)
+- **Hard drawdown stop**: 35% per coin → trading halted
+- **Dynamic signal gate**: scales with equity (5/day × equity/initial)
+- **Entry/exit slippage**: 0.05% applied to all fills
+
+### Example Session
+
+```
+2026-06-14 11:32:36 [INFO] Paper trading started
+2026-06-14 11:32:36 [INFO] Symbols: ['BTC/USDT', 'SOL/USDT', 'BNB/USDT']
+2026-06-14 11:32:36 [INFO] Initial Capital: $50.0 per coin
+2026-06-14 11:32:36 [INFO] Risk Per Trade: 2.5%
+2026-06-14 11:32:36 [INFO] Leverage: 10x
+
+2026-06-14 11:45:12 [INFO] BTC/USDT: Entered long @ 104,235.50 | Qty: 0.0047 | Lev: 10x | SL: 103,193.14 | TP: 107,363.56 | Signal: 0.52 | Regime: trending_bullish
+2026-06-14 12:30:45 [INFO] BTC/USDT: Closed long @ 104,892.30 | PnL: $2.87 (5.7%) | Reason: tp | Equity: $52.87
+```
+
+### Verification
+
+To verify paper trading mirrors backtest:
+
+```bash
+# 1. Run backtest on recent data
+python analyze.py 15m ETH/USDT
+
+# 2. Compare trade patterns
+# Paper trades should match backtest signals for the same bar timestamps
+# Regime detection should be identical for same 4h windows
+# SL/TP levels should match (ATR × 2.0 / 6.0)
+```
+
+### Architecture
+
+```
+paper_trade.py
+├── BinanceWebSocket       # WebSocket client (15m klines)
+├── PaperTradingEngine     # Main loop
+│   ├── _on_kline()        # Process closed bar
+│   ├── _update_regime_data()  # Update 4h regime
+│   ├── _check_position_exit() # SL/TP/time exit
+│   ├── _evaluate_entry()  # Signal + regime + sizing
+│   └── _save_trade()      # Log to JSON
+└── State per symbol
+    ├── equity/peak_equity
+    ├── consecutive_losses
+    ├── open_positions
+    ├── kline_history (1000 bars)
+    ├── regime_history (500 bars)
+    └── daily_signal_counts
+```
 
 ---
 
