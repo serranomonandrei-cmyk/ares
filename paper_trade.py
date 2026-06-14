@@ -236,31 +236,40 @@ class PaperTradingEngine:
         
     async def initialize(self):
         """Load historical data for each symbol."""
+        from crypto_ares.data.downloader import load_cached_data
+        
         logger.info("Initializing historical data...")
         
         for symbol in self.symbols:
             try:
-                # Load from parquet cache if available
-                cache_path = Path('data_cache') / f"{symbol.replace('/', '_')}_15m.parquet"
-                if cache_path.exists():
-                    df = pd.read_parquet(cache_path)
+                # Load 15m data
+                df = load_cached_data(symbol, '15m')
+                if not df.empty:
+                    df = compute_all_features(df)
                     self.kline_history[symbol] = df.tail(500).copy()
-                    logger.info(f"  {symbol}: Loaded {len(df)} historical bars from cache")
+                    logger.info(f"  {symbol}: Loaded {len(df)} 15m bars ({len(df.columns)} features)")
                 else:
                     # Fetch from Binance API
                     df = await self._fetch_historical(symbol, '15m', limit=500)
                     if df is not None:
                         self.kline_history[symbol] = df
-                        logger.info(f"  {symbol}: Fetched {len(df)} historical bars")
+                        logger.info(f"  {symbol}: Fetched {len(df)} 15m bars")
                     else:
-                        logger.warning(f"  {symbol}: No historical data available")
+                        logger.warning(f"  {symbol}: No 15m data available")
                         
-                # Load 4h data for regime
-                cache_4h = Path('data_cache') / f"{symbol.replace('/', '_')}_4h.parquet"
-                if cache_4h.exists():
-                    df_4h = pd.read_parquet(cache_4h)
+                # Load 4h data (resampled from 1h if needed)
+                df_4h = load_cached_data(symbol, '4h')
+                if not df_4h.empty:
+                    df_4h = compute_all_features(df_4h)
                     self.regime_history[symbol] = df_4h.tail(500).copy()
                     logger.info(f"  {symbol}: Loaded {len(df_4h)} 4h bars for regime")
+                    
+                    # Initialize regime from historical data
+                    if len(df_4h) >= 200:
+                        self.current_regime[symbol] = detect_regime(df_4h)
+                        logger.info(f"  {symbol}: Initial regime = {self.current_regime[symbol].get('composite', 'unknown')}")
+                else:
+                    logger.warning(f"  {symbol}: No 4h data available for regime")
                     
             except Exception as e:
                 logger.error(f"  {symbol}: Initialization error: {e}")
