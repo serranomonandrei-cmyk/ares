@@ -10,3 +10,6 @@ results/
 venv/
 *.npy
 .DS_Store
+paper_trades.json
+paper_equity.json
+test_paper_trade.py
